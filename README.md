@@ -13,7 +13,10 @@ pip install -r requirements.txt
 ```
 ## 執行
 自備.mp4到資料夾
+影片開始前選取車子通過區塊 左上拉到右下 兩次
 
 ```bash
 python main.py
 ```
+## 預覽
+![alt text](image.png)
