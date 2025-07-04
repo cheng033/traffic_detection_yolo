@@ -16,95 +16,42 @@ import sys
 # ---------- 使用者選擇影片 ----------
 MODEL_PATH = "best2.pt"  # 模型路徑寫死，若需改為選擇模型，也可用 askopenfilename()
 
-print("請選擇輸入來源：")
-print("1. 載入影片檔案")
-print("2. 使用攝影機即時偵測")
-mode = input("請輸入 1 或 2：")
+Tk().withdraw()  # 關閉 tkinter 主視窗，只使用檔案選取對話框
+VIDEO_PATH = askopenfilename(title="請選擇影片檔案", filetypes=[("MP4 files", "*.mp4"), ("All files", "*.*")])
 
-if mode == '1':
-    # 使用者選擇影片
-    Tk().withdraw()
-    VIDEO_PATH = askopenfilename(title="請選擇影片檔案", filetypes=[("MP4 files", "*.mp4"), ("All files", "*.*")])
-    if not VIDEO_PATH:
-        print("未選擇影片，程式結束。")
-        sys.exit()
-    cap = cv2.VideoCapture(VIDEO_PATH)
-
-elif mode == '2':
-    # 開啟攝影機
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("無法開啟攝影機")
-        sys.exit()
-
-else:
-    print("輸入錯誤，請輸入 1 或 2")
+# 如果沒選檔案，結束程式
+if not VIDEO_PATH:
+    print("未選擇影片，程式結束。")
     sys.exit()
 
-# 嘗試讀取第一幀
-ret, first_frame = cap.read()
-if not ret:
-    print("無法讀取影像來源")
-    sys.exit()
 
-# 若無法讀取影片，跳出錯誤
-if not ret:
-    print("無法讀取影片，請確認 VIDEO_PATH")
-    sys.exit()
-# ---------- 讓使用者畫兩個矩形區域（共用邏輯） ----------
+# ---------- 1. 讓使用者畫兩個矩形區域 ----------
 
 drawing = False
 areas = []     # 儲存已畫完的區域，每個元素是 [(x1,y1), (x2,y2)]
 temp = []      # 暫存目前正在畫的矩形
 
+# 滑鼠回呼函式，讓使用者框出兩個區域
 def draw_rect(event, x, y, flags, param):
     global drawing, temp, areas
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
-        temp = [(x, y)]
+        temp = [(x, y)]  # 紀錄起點
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
-        temp.append((x, y))
+        temp.append((x, y))  # 紀錄終點
         if len(temp) == 2:
-            areas.append(tuple(temp))
-            temp = []
+            areas.append(tuple(temp))  # 儲存區域
+            temp = []  # 清空暫存
 
-cv2.namedWindow("Draw 2 Areas (Click-LT & RB twice)")
-cv2.setMouseCallback("Draw 2 Areas (Click-LT & RB twice)", draw_rect)
+# 開啟影片
+cap = cv2.VideoCapture(VIDEO_PATH)
+ret, first_frame = cap.read()  # 讀取第一幀，供使用者框選
 
-while True:
-    disp = first_frame.copy()
-
-    # 畫出框
-    for rect in areas:
-        cv2.rectangle(disp, rect[0], rect[1], (0, 255, 0), 2)
-
-    if len(temp) == 2:
-        cv2.rectangle(disp, temp[0], temp[1], (0, 0, 255), 2)
-
-    # 提示使用者
-    cv2.putText(disp, "Enter: 確認區域, C: 清除", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-    cv2.imshow("Draw 2 Areas (Click-LT & RB twice)", disp)
-
-    key = cv2.waitKey(1) & 0xFF
-
-    if key == 27:  # ESC 離開
-        cap.release()
-        cv2.destroyAllWindows()
-        sys.exit()
-
-    if key == ord('c'):
-        areas.clear()
-        temp.clear()
-        print("已清除畫面，請重新繪製兩個區域")
-
-    if key == 13 and len(areas) == 2:  # Enter
-        break
-
-cv2.destroyWindow("Draw 2 Areas (Click-LT & RB twice)")
-print("兩個區域座標：", areas)
+# 若無法讀取影片，跳出錯誤
+if not ret:
+    print("無法讀取影片，請確認 VIDEO_PATH")
+    sys.exit()
 
 # 顯示畫面，讓使用者畫出兩個區域
 cv2.namedWindow("Draw 2 Areas (Click-LT & RB twice)")
@@ -130,12 +77,19 @@ while True:
         cv2.destroyAllWindows()
         sys.exit()
 
-    if key == ord('c'):  # C 鍵重置
-        areas.clear()
-        temp.clear()
-        print("已清除畫面，請重新繪製兩個區域")
+    if key == ord('c'):
+        if temp:  # 如果正在畫但還沒放開滑鼠
+            temp.clear()
+            print("已取消當前正在繪製的矩形")
+        elif areas:  # 如果已完成的框中還有
+            removed = areas.pop()  # 移除最後一個完成的區域
+            print(f"已移除最後一個區域：{removed}")
+        else:
+            print("目前沒有可以取消的區域")
 
-    if len(areas) >= 2:
+
+
+    if key == 13 and len(areas) >= 2:  # Enter 鍵（keycode 13）＋兩個區域畫完
         break
 
 
