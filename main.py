@@ -58,7 +58,7 @@ while True:
     if len(temp) == 2:
         cv2.rectangle(disp, temp[0], temp[1], (0, 0, 255), 2)
 
-    cv2.putText(disp, "Enter: 確認區域, C: 清除", (10, 30),
+    cv2.putText(disp, "Press Enter: confirm, C: clear", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     cv2.imshow("Draw 2 Areas", disp)
 
@@ -114,6 +114,9 @@ while cap.isOpened():
         confs = boxes.conf.cpu().numpy()
 
         for box, tid, cls, conf in zip(boxes.xyxy.cpu().numpy(), ids, classes, confs):
+            if conf < 0.4:
+                continue
+
             tid = int(tid)
             label = f"{names[int(cls)]} {conf:.2f}"
             color = palette[int(cls) % len(palette)]
