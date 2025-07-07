@@ -31,10 +31,17 @@ if not ret:
     print("無法讀取影像來源")
     sys.exit()
 
-# ---------- 讓使用者畫兩個矩形區域 ----------
+# ---------- 讓使用者畫矩形區域 ----------
+NUM_AREAS = 4
 drawing = False
 areas = []
 temp = []
+area_palette = [
+    (255, 0, 0),    # 藍（上）
+    (0, 165, 255),  # 橙（下）
+    (0, 255, 255),  # 黃（左）
+    (128, 0, 128),  # 紫（右）
+]
 
 def draw_rect(event, x, y, flags, param):
     global drawing, temp, areas
@@ -48,8 +55,8 @@ def draw_rect(event, x, y, flags, param):
             areas.append(tuple(temp))
             temp = []
 
-cv2.namedWindow("Draw 2 Areas")
-cv2.setMouseCallback("Draw 2 Areas", draw_rect)
+cv2.namedWindow("Draw Areas")
+cv2.setMouseCallback("Draw Areas", draw_rect)
 
 while True:
     disp = first_frame.copy()
@@ -60,7 +67,7 @@ while True:
 
     cv2.putText(disp, "Press Enter: confirm, C: clear", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv2.imshow("Draw 2 Areas", disp)
+    cv2.imshow("Draw Areas", disp)
 
     key = cv2.waitKey(1) & 0xFF
     if key == 27:
@@ -70,25 +77,27 @@ while True:
     if key == ord('c'):
         areas.clear()
         temp.clear()
-        print("已清除畫面，請重新繪製兩個區域")
-    if key == 13 and len(areas) == 2:
+        print("已清除畫面，請重新繪製區域")
+    if key == 13 and len(areas) == NUM_AREAS:
         break
 
-cv2.destroyWindow("Draw 2 Areas")
-print("兩個區域座標：", areas)
+cv2.destroyWindow("Draw Areas")
+print("區域座標：", areas)
 
 # ---------- 初始化模型 ----------
 model = YOLO(MODEL_PATH)
 names = model.names
-palette = [(255,0,0),(0,255,0),(0,0,255),(255,255,0),(255,0,255),
-           (0,255,255),(128,128,0),(128,0,128),(0,128,128),(255,255,255)]
-
+yolo_palette = [
+    (0, 255, 0),      # 綠（car）
+    (0, 0, 255),      # 紅（bus）
+    (255, 255, 0),    # 青藍（motor）
+    (255, 0, 255),    # 粉紅（truck）
+]
 # ---------- 計數資料 ----------
 tracks = {}
-counted_left = set()
-counted_right = set()
-cross_left = 0
-cross_right = 0
+
+counted = [set() for _ in range(NUM_AREAS)]
+cross = [0 for _ in range(NUM_AREAS)]
 
 def is_overlap(box1, box2):
     ax1, ay1, ax2, ay2 = box1
@@ -119,7 +128,7 @@ while cap.isOpened():
 
             tid = int(tid)
             label = f"{names[int(cls)]} {conf:.2f}"
-            color = palette[int(cls) % len(palette)]
+            color = yolo_palette[int(cls) % len(yolo_palette)]
 
             x1, y1, x2, y2 = map(int, box)
             cx, cy = int((x1 + x2)/2), int((y1 + y2)/2)
@@ -129,33 +138,24 @@ while cap.isOpened():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
             det_box = (x1, y1, x2, y2)
-            area0_box = (
-                min(areas[0][0][0], areas[0][1][0]),
-                min(areas[0][0][1], areas[0][1][1]),
-                max(areas[0][0][0], areas[0][1][0]),
-                max(areas[0][0][1], areas[0][1][1])
-            )
-            area1_box = (
-                min(areas[1][0][0], areas[1][1][0]),
-                min(areas[1][0][1], areas[1][1][1]),
-                max(areas[1][0][0], areas[1][1][0]),
-                max(areas[1][0][1], areas[1][1][1])
-            )
 
-            if tid not in counted_left and is_overlap(det_box, area0_box):
-                cross_left += 1
-                counted_left.add(tid)
-            if tid not in counted_right and is_overlap(det_box, area1_box):
-                cross_right += 1
-                counted_right.add(tid)
+            for i in range(NUM_AREAS):
+                area_box = (
+                    min(areas[i][0][0], areas[i][1][0]),
+                    min(areas[i][0][1], areas[i][1][1]),
+                    max(areas[i][0][0], areas[i][1][0]),
+                    max(areas[i][0][1], areas[i][1][1])
+                )
 
-    cv2.rectangle(frame, areas[0][0], areas[0][1], (0,255,0), 2)
-    cv2.rectangle(frame, areas[1][0], areas[1][1], (255,0,0), 2)
-
-    cv2.putText(frame, f"Left crossing:  {cross_left}",  (30,40),
-                cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),3)
-    cv2.putText(frame, f"Right crossing: {cross_right}", (30,80),
-                cv2.FONT_HERSHEY_SIMPLEX,1,(255,0,0),3)
+                if tid not in counted[i] and is_overlap(det_box, area_box):
+                    cross[i] += 1
+                    counted[i].add(tid)
+    for i in range(NUM_AREAS):
+        color = area_palette[i]
+        cv2.rectangle(frame, areas[i][0], areas[i][1], color, 2)
+        cv2.putText(frame, f"Area {i+1} crossing: {cross[i]}", (30, 40 + i * 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
+        
 
     cv2.imshow("YOLOv8 Crossing Counter", frame)
 
@@ -164,9 +164,10 @@ while cap.isOpened():
         break
     if key == ord('r'):
         tracks.clear()
-        counted_left.clear()
-        counted_right.clear()
-        cross_left = cross_right = 0
+        for s in counted:
+            s.clear()
+        for i in range(NUM_AREAS):
+            cross[i] = 0
         print("已重置計數")
 
 cap.release()
