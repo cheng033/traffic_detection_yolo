@@ -10,6 +10,17 @@ import itertools
 import sys
 import argparse
 
+import torch
+
+# 確認設備是否支援 CUDA（GPU）
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+    print("GPU 已啟用：", torch.cuda.get_device_name(0))
+else:
+    device = torch.device("cpu")
+    print("未偵測到 GPU，使用 CPU 模式")
+
+
 # ---------- 解析 GUI 傳入的參數 ----------
 parser = argparse.ArgumentParser()
 parser.add_argument('--video', type=str, help='影片路徑')
@@ -21,15 +32,24 @@ MODEL_PATH = "modelv1.pt"
 if args.video:
     cap = cv2.VideoCapture(args.video)
 elif args.camera:
-    cap = cv2.VideoCapture(0)
+
+    cap = cv2.VideoCapture(1)
+    if not cap.isOpened():
+        print("攝影機開啟失敗，請確認裝置是否存在、權限允許，或是否被其他程式佔用")
+        sys.exit()
+
 else:
     print("請指定影片或攝影機作為來源")
     sys.exit()
 
 ret, first_frame = cap.read()
-if not ret:
-    print("無法讀取影像來源")
+
+if not ret or first_frame is None:
+    print("無法讀取第一幀影像，可能是來源無畫面或裝置未準備好")
+    cap.release()
     sys.exit()
+
+
 
 # ---------- 讓使用者畫矩形區域 ----------
 NUM_AREAS = 4
@@ -85,7 +105,9 @@ cv2.destroyWindow("Draw Areas")
 print("區域座標：", areas)
 
 # ---------- 初始化模型 ----------
-model = YOLO(MODEL_PATH)
+
+model = YOLO(MODEL_PATH).to(device)
+
 names = model.names
 yolo_palette = [
     (0, 255, 0),      # 綠（car）
