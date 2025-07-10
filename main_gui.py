@@ -1,3 +1,4 @@
+# main_gui.py
 import tkinter as tk                           # 匯入tkinter做GUI
 from tkinter import filedialog, messagebox     # 檔案對話框、彈出訊息框
 import subprocess                             # 執行外部程式用
