@@ -1,72 +1,80 @@
-# main_gui.py
-import tkinter as tk                           # 匯入tkinter做GUI
-from tkinter import filedialog, messagebox     # 檔案對話框、彈出訊息框
-import subprocess                             # 執行外部程式用
-import sys                                    # 取得python執行檔路徑
-import os                                     # 處理檔案路徑
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import subprocess
+import sys
+import os
 
-# 動作：選擇影片
 def choose_video():
-    path = filedialog.askopenfilename(        # 彈出檔案選擇視窗
+    path = filedialog.askopenfilename(
         title="選擇影片",
         filetypes=[("MP4 Files", "*.mp4"), ("All Files", "*.*")]
     )
-    if path:                                  # 如果有選到檔案
-        video_path.set(path)                  # 設定變數
-        status_label.config(text=f"已選擇影片：{os.path.basename(path)}") # 更新顯示檔名
-    else:                                     # 如果沒選
-        video_path.set("")                    # 清空影片路徑
-        status_label.config(text="尚未選擇影片") # 狀態顯示
+    if path:
+        video_path.set(path)
+        status_label.config(text=f"已選擇影片：{os.path.basename(path)}")
+    else:
+        video_path.set("")
+        status_label.config(text="尚未選擇影片")
 
-# 動作：啟動 main.py 執行偵測
 def start_detection():
-    mode = input_mode.get()                   # 取得來源選項（video/camera）
-    video = video_path.get()                  # 取得影片路徑
-    # 取得main.py路徑（確保即使工作目錄不同也能找到）
+    mode = input_mode.get()
+    video = video_path.get()
+    url = url_input.get()
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")
 
-    if mode == "video" and not video:         # 若是影片但沒選，提示
-        status_label.config(text="請先選擇影片！")
-        return
-
-    # 檢查main.py是否存在
+    # 必要檢查
     if not os.path.exists(script_path):
         messagebox.showerror("找不到main.py", f"main.py不存在於：\n{script_path}")
         return
 
-    cmd = [sys.executable, script_path]       # 組合命令：python main.py
+    cmd = [sys.executable, script_path]
     if mode == "video":
-        cmd += ["--video", video]             # 加上影片路徑參數
-    else:
-        cmd += ["--camera"]                   # 或是選攝影機參數
+        if not video:
+            status_label.config(text="請先選擇影片！")
+            return
+        cmd += ["--video", video]
+    elif mode == "camera":
+        cmd += ["--camera"]
+    elif mode == "url":
+        if not url:
+            status_label.config(text="請輸入即時影像網址！")
+            return
+        cmd += ["--url", url]
 
-    status_label.config(text="已啟動偵測... 請稍候") # 更新狀態
+    status_label.config(text="已啟動偵測... 請稍候")
     try:
-        subprocess.Popen(cmd)                 # 啟動main.py新程序
+        subprocess.Popen(cmd)
     except Exception as e:
-        messagebox.showerror("執行錯誤", str(e)) # 啟動失敗彈窗顯示錯誤
+        messagebox.showerror("執行錯誤", str(e))
         return
-    root.destroy()                            # 關閉GUI
+    root.destroy()
 
 # --- 介面設計 ---
-root = tk.Tk()                               # 建立主視窗
-root.title("YOLOv8 計數系統 GUI")            # 設定標題
-root.geometry("400x250")                     # 固定大小
-root.resizable(False, False)                 # 不允許縮放
+root = tk.Tk()
+root.title("YOLOv8 計數系統 GUI")
+root.geometry("430x320")
+root.resizable(False, False)
 
-input_mode = tk.StringVar(value="video")     # 用來儲存選擇的輸入來源
-video_path = tk.StringVar()                  # 儲存影片路徑
+input_mode = tk.StringVar(value="video")
+video_path = tk.StringVar()
+url_input = tk.StringVar()
 
-tk.Label(root, text="請選擇輸入來源：", font=("Arial", 14)).pack(pady=10) # 標題
+tk.Label(root, text="請選擇輸入來源：", font=("Arial", 14)).pack(pady=10)
 
-tk.Radiobutton(root, text="影片檔案", variable=input_mode, value="video").pack()  # 選影片
-tk.Button(root, text="選擇影片", command=choose_video).pack(pady=5)              # 影片選擇按鈕
-tk.Radiobutton(root, text="攝影機（即時）", variable=input_mode, value="camera").pack() # 選攝影機
+radio_frame = tk.Frame(root)
+radio_frame.pack()
 
-tk.Button(root, text="開始偵測", command=start_detection,                      # 啟動主程式按鈕
-          bg="green", fg="white", font=("Arial", 12)).pack(pady=15)
+tk.Radiobutton(radio_frame, text="影片檔案", variable=input_mode, value="video").grid(row=0, column=0, sticky='w')
+tk.Button(radio_frame, text="選擇影片", command=choose_video).grid(row=0, column=1, padx=10)
+tk.Radiobutton(radio_frame, text="攝影機（即時）", variable=input_mode, value="camera").grid(row=1, column=0, sticky='w')
 
-status_label = tk.Label(root, text="尚未選擇影片或來源", fg="blue")             # 狀態顯示
+tk.Radiobutton(radio_frame, text="即時網頁影像", variable=input_mode, value="url").grid(row=2, column=0, sticky='w')
+tk.Entry(radio_frame, textvariable=url_input, width=40).grid(row=2, column=1, padx=10)
+tk.Label(radio_frame, text="範例：https://tw.live/cam/?id=NWT0052", fg="gray", font=("Arial", 8)).grid(row=3, column=1, sticky='w')
+
+tk.Button(root, text="開始偵測", command=start_detection, bg="green", fg="white", font=("Arial", 12)).pack(pady=18)
+
+status_label = tk.Label(root, text="尚未選擇影片或來源", fg="blue")
 status_label.pack()
 
-root.mainloop()                               # 進入GUI事件迴圈，等待用戶操作
+root.mainloop()
