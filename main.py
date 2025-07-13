@@ -181,7 +181,7 @@ def main():
         sys.exit()
 
     draw_lines_interface(first_frame)
-    model = YOLO("modelv1.pt").to(device)
+    model = YOLO("modelv8.pt").to(device)
     names = model.names
 
     fps = cap.get(cv2.CAP_PROP_FPS)
