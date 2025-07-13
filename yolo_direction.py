@@ -11,7 +11,8 @@ temp_line = []
 drawing = False
 vehicle_tracks = {}
 vehicle_direction_map = {}
-FRAME_COUNT = 0
+FRAME_COUNT = 0 
+line_pass_count = []
 
 # ----- 工具 function -----
 def point_to_line_distance(p, a, b):
@@ -58,6 +59,7 @@ def draw_line_event(event, x, y, flags, param):
             temp_line = []
 
 def draw_lines_interface(first_frame):
+    global line_pass_count
     cv2.namedWindow("Draw Lines")
     cv2.setMouseCallback("Draw Lines", draw_line_event)
     while True:
@@ -80,6 +82,7 @@ def draw_lines_interface(first_frame):
             elif lines:
                 lines.pop()
         if key == 13 and len(lines) >= 2:
+            line_pass_count = [0] * len(lines)
             break
     cv2.destroyWindow("Draw Lines")
 
@@ -115,6 +118,7 @@ def process_frame(frame, model, names):
 
         if line_idx is not None and (not history or history[-1] != line_idx):
             history.append(line_idx)
+            line_pass_count[line_idx] += 1
 
         if len(history) >= 2:
             start, end = history[0], history[-1]
@@ -139,10 +143,11 @@ def draw_result_overlay(frame):
     for i, (p1, p2) in enumerate(lines):
         cv2.line(frame, p1, p2, colors[i % 4], 2)
         mid = ((p1[0]+p2[0])//2, (p1[1]+p2[1])//2)
-        cv2.putText(frame, f"{i}:{line_colors[i]}", mid, cv2.FONT_HERSHEY_SIMPLEX, 0.8, colors[i % 4], 2)
+        cv2.putText(frame, f"{i}:{line_colors[i]}  ({line_pass_count[i]})", mid, cv2.FONT_HERSHEY_SIMPLEX, 0.8, colors[i % 4], 2)
 
     y0 = 30
     for idx, ((start, end), data) in enumerate(vehicle_direction_map.items()):
+        total = data['motor'] + data['car'] + data['truck'] + data['bus']
         text = f"{start}->{end} ({data['dir']}): "
         for cls in ['motor','car','truck','bus']:
             text += f"{cls[0]}:{data[cls]} "
