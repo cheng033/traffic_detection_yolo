@@ -1,9 +1,8 @@
 # traffic_detection_yolo
 
-車輛種類辨識與車流偵測
+model.pt可在hugging face下載<br>
 
-可在hugging face測試
-https://huggingface.co/spaces/uchen3/traffic_yolo
+https://huggingface.co/uchen3/yolov8s-intersection-model/tree/main
 
 ## 安裝環境
 python 3.11.13
@@ -12,11 +11,8 @@ python 3.11.13
 pip install -r requirements.txt
 ```
 ## 執行
-自備.mp4到資料夾
-影片開始前選取車子通過區塊 左上拉到右下 兩次
-
+影片開始前選取車子通過區塊 左上拉到右下 
 ```bash
-python main.py
+python main_gui.py
 ```
-## 預覽
-![alt text](image.png)
+

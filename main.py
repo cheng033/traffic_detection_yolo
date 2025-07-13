@@ -1,3 +1,6 @@
+# main.py
+# 主要流程：初始化設備與參數 -> 取得來源畫面 -> 手動畫選區域 -> 初始化模型 -> 逐幀推論與計數顯示
+
 import os
 import cv2
 import torch
@@ -54,10 +57,15 @@ def main():
     # 載入YOLO
     model = YOLO("modelv8.pt").to(device)
     names = model.names
+    yolo_palette = [
+        (0, 255, 0),      # 綠（car）
+        (0, 0, 255),      # 紅（bus）
+        (255, 255, 0),    # 青藍（motor）
+        (255, 0, 255),    # 粉紅（truck）
+    ]
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     wait_time = int(1000 / fps) if fps and fps > 0 else 33
-
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -70,5 +78,4 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
 
-if __name__ == '__main__':
-    main()
+
