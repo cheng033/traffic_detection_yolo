@@ -2,3 +2,6 @@
 *.mp4
 .DS_Store
 __pycache__/
+*.csv
+*.png
+output/

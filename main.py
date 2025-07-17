@@ -8,6 +8,8 @@ import argparse
 from ultralytics import YOLO
 from yolo_direction import draw_lines_interface, process_frame, draw_result_overlay
 from selenium_capture import SeleniumCapture
+from utils import write_csv, plot_direction_donut
+import datetime
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -68,7 +70,7 @@ def main():
     draw_lines_interface(first_frame)
 
     # 載入YOLO
-    model = YOLO("modelv8.pt").to(device)
+    model = YOLO("modelv10.pt").to(device)
     names = model.names
     yolo_palette = [
         (0, 255, 0),      # 綠（car）
@@ -77,6 +79,7 @@ def main():
         (255, 0, 255),    # 粉紅（truck）
     ]
 
+    records = []
     fps = cap.get(cv2.CAP_PROP_FPS)
     wait_time = int(1000 / fps) if fps and fps > 0 else 33
     while True:
@@ -86,13 +89,28 @@ def main():
             ret, frame = cap.read()
         if not ret:
             break
-        frame = process_frame(frame, model, names)
+        frame, info = process_frame(frame, model, names)
+        if info:
+            records.extend(info)
+
         draw_result_overlay(frame)
         cv2.imshow("YOLO Crossing Direction", frame)
         if cv2.waitKey(wait_time) & 0xFF == 27:
             break
     cap.release()
     cv2.destroyAllWindows()
+
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_filename = os.path.join(output_dir, f"result_{timestamp}.csv")
+    sanitized_title = os.path.join(output_dir, f"traffic_{timestamp}")
+   
+    print("DEBUG: records =", records)
+    write_csv(records, csv_filename)
+    plot_direction_donut(records, sanitized_title)
+    print("統計完成，CSV 與視覺化圖表已儲存！")
+
 
 if __name__ == "__main__":
     main()

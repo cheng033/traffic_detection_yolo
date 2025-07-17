@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 import sys
-
+import datetime
 # ----- 全域變數 -----
 colors = [(0,0,255), (0,128,255), (0,255,255), (255,0,255)]  # 紅、橙、黃、紫
 line_colors = ['Red', 'Orange', 'Yellow', 'Purple']
@@ -94,6 +94,7 @@ def process_frame(frame, model, names):
     results = model.track(frame, persist=True, tracker="bytetrack.yaml")
     boxes = results[0].boxes
 
+    info_to_record = []
     if boxes is None:
         return frame
 
@@ -130,6 +131,9 @@ def process_frame(frame, model, names):
                         vehicle_direction_map[key] = {'motor':0, 'car':0, 'truck':0, 'bus':0, 'dir': direction}
                     vehicle_direction_map[key][class_name] += 1
                     print(f"[+1] {class_name} id={tid} 方向: {direction} ({start}->{end})")
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    info_to_record.append([tid, class_name, direction, timestamp])
+
                 vehicle_tracks[tid]['lines'] = []
 
         center = ((x1 + x2) // 2, (y1 + y2) // 2)
@@ -137,7 +141,7 @@ def process_frame(frame, model, names):
         cv2.circle(frame, center, 4, (255, 255, 255), -1)
         cv2.putText(frame, label, (center[0]+5, center[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
 
-    return frame
+    return frame, info_to_record
 
 def draw_result_overlay(frame):
     for i, (p1, p2) in enumerate(lines):
