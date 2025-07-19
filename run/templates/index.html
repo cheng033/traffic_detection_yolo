@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>車流量辨識系統</title>
+    <meta name="viewport" content="width=1100, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #fafbfc; }
+        .main-row { margin-top: 36px; }
+        .video-area {
+            border: 4px solid #111;
+            background: #fff;
+            width: 700px;
+            height: 500px;
+            font-size: 2em;
+            color: #333;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0;
+        }
+        #canvas { position: absolute; left: 0; top: 0; z-index: 3;}
+        .side-panel {
+            padding-left: 36px;
+            min-width: 270px;
+            max-width: 350px;
+            width: 330px;
+            white-space: normal;
+            word-break: break-all;
+        }
+        .custom-btn {
+            border: 2px solid #222;
+            width: 100%;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        .label-group { margin-bottom: 12px; }
+        .radio-label { margin-bottom: 6px; display: flex; align-items: center; font-size: 1.1em; }
+        .radio-label input[type="radio"] { margin-right: 10px; }
+        #area-count { margin-left: 8px; font-size: 0.96em; color: #666; }
+        .file-select-tip {
+            font-size: 0.95em;
+            color: #999;
+            margin-left: 8px;
+            max-width: 130px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: inline-block;
+            vertical-align: bottom;
+            white-space: nowrap;
+        }
+        #count-table { margin-top: 32px; }
+        .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+        .btn-row .custom-btn { width: 48%; min-width: 110px; margin-bottom: 0; }
+        @media (max-width: 1000px) {
+            .main-row { flex-direction: column; }
+            .side-panel { padding-left: 0; margin-top: 24px; }
+        }
+    </style>
+</head>
+<body>
+<div class="container main-row">
+    <div class="row align-items-start flex-nowrap">
+        <!-- 左側：影像顯示區 -->
+        <div class="col-auto">
+            <div class="video-area">
+                <img id="first-frame"
+                     src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+                     alt="影片預覽" width="700" height="500" style="object-fit:contain;position:relative;z-index:1;">
+                <canvas id="canvas" width="700" height="500" style="pointer-events:auto;"></canvas>
+            </div>
+        </div>
+        <!-- 右側：控制面板 -->
+        <div class="col-auto side-panel">
+            <h5 style="font-weight:bold;">選擇影片來源</h5>
+            <div class="label-group">
+                <label class="radio-label">
+                    <input type="radio" name="input_mode" value="video" checked>
+                    本地影片
+                    <button id="browse-btn" class="btn btn-outline-secondary btn-sm ms-3"
+                        onclick="chooseVideo()" style="border-width:2px;">瀏覽</button>
+                    <input type="file" id="video_file" accept="video/*" style="display:none;">
+                    <span class="file-select-tip" id="selected-file-tip"></span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="input_mode" value="camera"> 攝影機
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="input_mode" value="url"> 串流連結
+                    <input type="text" id="video_url" placeholder="請輸入串流網址"
+                        class="form-control ms-2" style="width:140px;display:inline-block;">
+                </label>
+            </div>
+            <!-- 確認來源按鈕 -->
+            <button class="custom-btn btn btn-primary mt-2 mb-2" onclick="confirmSource()">確認來源並載入預覽</button>
+            <hr>
+            <button class="custom-btn btn btn-light" onclick="clearAreas()">重畫偵測區域</button>
+            <span id="area-count">已畫 0 條線</span>
+            <button class="custom-btn btn btn-success mt-2 mb-2" onclick="startDetection()">開始偵測</button>
+            <div class="btn-row">
+                <button class="custom-btn btn btn-outline-primary" onclick="pauseVideo()">暫停影片</button>
+                <button class="custom-btn btn btn-outline-secondary" onclick="exportCSV()">匯出CSV</button>
+                <button class="custom-btn btn btn-outline-danger" onclick="exitApp()">退出系統</button>
+            </div>
+        </div>
+    </div>
+    <div class="row" id="count-table">
+        <div class="col-12">
+            <h5>各區域流量計數</h5>
+            <div id="stats-table">尚未啟動辨識</div>
+        </div>
+    </div>
+</div>
+<script>
+    // ----------- 畫線功能 ---------
+	let canvas = document.getElementById('canvas');
+	let ctx = canvas.getContext('2d');
+	let areas = [];
+	let temp = [];
+	const lineColors = ["#1E90FF", "#FFA500", "#FFD700", "#800080", "#00FF00", "#FF00FF"];
+
+	canvas.addEventListener('mousedown', function(e) {
+		if (!window.firstFrameLoaded) return; // 必須先載入預覽才能畫線
+		let rect = canvas.getBoundingClientRect();
+		let x = Math.round((e.clientX - rect.left) / rect.width * canvas.width);
+		let y = Math.round((e.clientY - rect.top) / rect.height * canvas.height);
+		if (temp.length === 0) {
+			temp.push([x, y]);
+		} else if (temp.length === 1) {
+			temp.push([x, y]);
+			areas.push([temp[0], temp[1]]);
+			temp = [];
+			redraw();
+			document.getElementById('area-count').innerText = `已畫 ${areas.length} 條線`;
+		}
+	});
+	function redraw() {
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		for (let i = 0; i < areas.length; i++) {
+			let line = areas[i];
+			ctx.strokeStyle = lineColors[i % lineColors.length];
+			ctx.lineWidth = 3;
+			ctx.beginPath();
+			ctx.moveTo(line[0][0], line[0][1]);
+			ctx.lineTo(line[1][0], line[1][1]);
+			ctx.stroke();
+			ctx.fillStyle = lineColors[i % lineColors.length];
+			ctx.font = "bold 18px Arial";
+			ctx.fillText(`線${i}`, line[0][0] + 6, line[0][1] - 8);
+		}
+		if (temp.length === 1) {
+			ctx.fillStyle = "#aaa";
+			ctx.beginPath();
+			ctx.arc(temp[0][0], temp[0][1], 4, 0, 2 * Math.PI);
+			ctx.fill();
+		}
+	}
+	function clearAreas() {
+		areas = [];
+		temp = [];
+		redraw();
+		document.getElementById('area-count').innerText = "已畫 0 條線";
+	}
+
+    // ----------- 來源選擇 ---------
+    let inputMode = "video";
+    document.querySelectorAll('input[name="input_mode"]').forEach(r => {
+        r.addEventListener('change', function() {
+            inputMode = this.value;
+            document.getElementById("browse-btn").disabled = (inputMode !== "video");
+            document.getElementById("video_url").disabled = (inputMode !== "url");
+        });
+    });
+    document.getElementById("video_url").disabled = true;
+    let fileInput = document.getElementById("video_file");
+    function chooseVideo() { fileInput.click(); }
+    fileInput.addEventListener('change', function(){
+        document.getElementById("selected-file-tip").innerText = this.files[0]?.name || "";
+    });
+
+    // ----------- 按下確認後取得預覽 -----------
+    function confirmSource() {
+        window.firstFrameLoaded = false;
+        if (inputMode === "video") {
+            if (!fileInput.files[0]) { alert("請先選擇影片"); return; }
+            loadFirstFrameFromFile(fileInput.files[0]);
+        } else if (inputMode === "camera") {
+            // 後端需提供 /preview_camera 回傳單張 jpeg
+            fetch('/preview_camera').then(r => r.blob()).then(blob => {
+                let url = URL.createObjectURL(blob);
+                document.getElementById('first-frame').src = url;
+                window.firstFrameLoaded = true;
+                clearAreas();
+            }).catch(() => { alert("無法取得攝影機預覽"); });
+        } else if (inputMode === "url") {
+            let urlStr = document.getElementById("video_url").value;
+            if (!urlStr) { alert("請輸入串流網址"); return; }
+            // 後端需提供 /preview_url?url=... 回傳單張 jpeg
+            fetch('/preview_url?url=' + encodeURIComponent(urlStr)).then(r => r.blob()).then(blob => {
+                let url = URL.createObjectURL(blob);
+                document.getElementById('first-frame').src = url;
+                window.firstFrameLoaded = true;
+                clearAreas();
+            }).catch(() => { alert("無法取得串流預覽"); });
+        }
+    }
+
+    // 取得本地影片第一幀
+    function loadFirstFrameFromFile(file) {
+        let url = URL.createObjectURL(file);
+        let video = document.createElement('video');
+        video.preload = "auto";
+        video.src = url;
+        video.onloadeddata = function() {
+            let cv = document.createElement('canvas');
+            cv.width = video.videoWidth;
+            cv.height = video.videoHeight;
+            let vctx = cv.getContext('2d');
+            vctx.drawImage(video, 0, 0, cv.width, cv.height);
+            let mainCanvas = document.getElementById('canvas');
+            let mainW = mainCanvas.width, mainH = mainCanvas.height;
+            let tmp = document.createElement('canvas');
+            tmp.width = mainW; tmp.height = mainH;
+            let tctx = tmp.getContext('2d');
+            tctx.drawImage(cv, 0, 0, mainW, mainH);
+            let dataURL = tmp.toDataURL('image/jpeg');
+            document.getElementById('first-frame').src = dataURL;
+            window.firstFrameLoaded = true;
+            clearAreas();
+        }
+        video.onerror = function() {
+            alert("無法預覽影片，請換一個影片檔案");
+            window.firstFrameLoaded = false;
+        }
+        video.currentTime = 0.0;
+    }
+
+    // ----------- 開始辨識（送出所有資料給後端） -----------
+    function startDetection() {
+        if (!window.firstFrameLoaded) { alert("請先確認並載入來源！"); return; }
+        if (areas.length === 0) { alert("請先畫出偵測區域！"); return; }
+        let formData = new FormData();
+        formData.append('input_mode', inputMode);
+        formData.append('areas', JSON.stringify(areas));
+        if (inputMode === "video") {
+            if (fileInput.files.length === 0) {
+                alert("請選擇影片檔案！"); return;
+            }
+            formData.append('video', fileInput.files[0]);
+        } else if (inputMode === "url") {
+            let url = document.getElementById("video_url").value;
+            if (!url) { alert("請輸入串流網址！"); return; }
+            formData.append('video_url', url);
+        }
+        fetch('/start', {method: "POST", body: formData})
+            .then(r => r.json()).then(res => {
+                if (res.status === "OK") {
+                    document.getElementById('first-frame').src = '/video_feed?d=' + Date.now();
+                    pollStats();
+                } else {
+                    alert("啟動失敗：" + (res.msg || ""));
+                }
+            });
+    }
+
+    // ----------- 即時統計資料輪詢 ----------- 
+    let pollInterval;
+    function pollStats() {
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(function() {
+            fetch('/stats').then(r => r.json()).then(s => {
+                document.getElementById('stats-table').innerText = JSON.stringify(s, null, 2);
+            });
+        }, 1000);
+    }
+
+    // ----------- 其他功能 ----------- 
+    function pauseVideo() {
+        alert("暫停/繼續影片功能請根據後端設計來串接");
+    }
+    function exportCSV() {
+        window.open('/export_csv', '_blank');
+    }
+    function exitApp() {
+        if (confirm("確定要離開/結束本系統嗎？")) {
+            window.open('', '_self');
+            window.close();
+        }
+    }
+
+    // 初始化
+    window.firstFrameLoaded = false;
+    redraw();
+</script>
+</body>
+</html>
+
