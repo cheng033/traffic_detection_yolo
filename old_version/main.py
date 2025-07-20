@@ -5,8 +5,8 @@ import torch
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from ultralytics import YOLO
-from yolo_direction import draw_lines_interface, colors
-from selenium_capture import SeleniumCapture
+from old_version.yolo_direction import draw_lines_interface, colors
+from old_version.selenium_capture import SeleniumCapture
 import datetime
 
 

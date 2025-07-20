@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox     # 導入檔案對話框、訊息�
 from PIL import Image, ImageTk                 # 導入 PIL 圖像處理（Image：開啟/處理圖片；ImageTk：Tkinter 顯示圖片轉換）
 import cv2                                     # OpenCV，主流影像處理與即時攝影機/影片讀取、處理套件
 import numpy as np                             # numpy，主要用於陣列數值運算（OpenCV 與 YOLO 輸出多為 numpy array）
-from selenium_capture import SeleniumCapture   # 匯入自訂的 SeleniumCapture 類別，提供網頁畫面截取（仿 cv2.VideoCapture 介面）
+from old_version.selenium_capture import SeleniumCapture   # 匯入自訂的 SeleniumCapture 類別，提供網頁畫面截取（仿 cv2.VideoCapture 介面）
 from ultralytics import YOLO                   # Ultralytics YOLOv8，先進的目標偵測/追蹤模型
 import csv                                     # Python 標準 csv 檔案處理（流量資料匯出用）
 
