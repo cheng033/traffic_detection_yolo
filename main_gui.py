@@ -14,7 +14,7 @@ class TrafficDetectionGUI:
 
         # === 主畫面結構 ===
         self.frame_top = tk.Frame(root)                        # 主上層 Frame，左右分區用
-        self.frame_top.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.frame_top.pack(side=tk.TOP)
 
         # 影像顯示區（左邊）
         self.frame_video = tk.Frame(self.frame_top)            # 左側 Frame，放影像
@@ -26,7 +26,7 @@ class TrafficDetectionGUI:
 
         # 控制/操作區（右邊）
         self.frame_controls = tk.Frame(self.frame_top)         # 右側 Frame，放所有控制按鈕/欄位
-        self.frame_controls.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.Y)
+        self.frame_controls.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.Y)
 
         # 來源選擇（本地影片、攝影機）
         self.btn_choose_video = tk.Button(self.frame_controls, text="選擇影片", width=18, command=self.choose_video)
@@ -68,11 +68,15 @@ class TrafficDetectionGUI:
         self.btn_exit = tk.Button(self.frame_controls, text="退出", width=18, command=root.quit)
         self.btn_exit.pack(pady=3)
 
-        # 統計表格（右側下方，顯示即時統計）
-        self.lbl_table_title = tk.Label(self.frame_controls, text="流量統計表", font=("Arial", 12, "bold"))
-        self.lbl_table_title.pack(anchor="w", padx=4, pady=(20,0))
-        self.text_table = tk.Text(self.frame_controls, height=7, width=24)  # 右側小表格
-        self.text_table.pack(padx=4, pady=6)
+        # 新增底部 Frame（影片下方統計表）
+        self.frame_bottom = tk.Frame(root)
+        self.frame_bottom.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(0,10))
+
+        self.lbl_table_title = tk.Label(self.frame_bottom, text="流量統計表", font=("Arial", 16, "bold"))
+        self.lbl_table_title.pack(side=tk.LEFT, padx=(0,10))
+
+        self.text_table = tk.Text(self.frame_bottom, height=4, width=80, font=("Consolas", 16))
+        self.text_table.pack(side=tk.LEFT, padx=4)
 
         # === 狀態變數初始化 ===
         self.cap = None                          # 當前來源物件（cv2.VideoCapture 或 SeleniumCapture）
@@ -90,12 +94,14 @@ class TrafficDetectionGUI:
         self.x_scale = 1                         # 原始寬度/顯示寬度（canvas→原圖轉換倍率）
         self.y_scale = 1                         # 原始高度/顯示高度
         self.label_colors = {
+            "bus": (255, 128, 0),       # 橘色
             "car": (0, 255, 0),       # 綠色
-            "bus": (255, 0, 0),       # 藍色
             "motor": (0, 255, 255),   # 黃色
-            "truck": (255, 128, 0),   # 橘色
+            "truck": (255, 0, 0),   # 藍色
             }
-        
+        self.car_types = ["bus", "car", "motor", "truck"]  
+        self.counts = [ { t: 0 for t in self.car_types } for _ in range(self.max_lines) ]
+        self.crossed_track_label = {} # 用於記錄已經過線的車輛與其類型（track_id, line_idx）: car_type
         
 
     # === 來源選擇 ===
@@ -239,7 +245,7 @@ class TrafficDetectionGUI:
             return
         self.model = YOLO('modelv14.pt')
         self.detection_running = True
-        self.counts = [0 for _ in range(self.max_lines)]
+        self.counts = [ { t: 0 for t in self.car_types } for _ in range(self.max_lines) ]
         self.track_dict = {}
         self.btn_pause.config(state=tk.NORMAL)
         self.btn_start.config(state=tk.DISABLED)
@@ -271,20 +277,21 @@ class TrafficDetectionGUI:
                 continue
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
-            # 判斷 crossing (要用原始frame座標)
-            for idx, line in enumerate(self.lines):
-                if line and line[0] and line[1]:
-                    # canvas->原始座標
-                    lx1, ly1 = int(line[0][0]*self.x_scale), int(line[0][1]*self.y_scale)
-                    lx2, ly2 = int(line[1][0]*self.x_scale), int(line[1][1]*self.y_scale)
-                    self._check_cross(track_id, (center_x, center_y), idx, lx1, ly1, lx2, ly2)
-                    
+
             # 取得 label 文字
             if hasattr(self.model, "names"):
                 label_name = self.model.names[int(class_id)] if int(class_id) < len(self.model.names) else str(int(class_id))
             else:
                 label_name = str(int(class_id))
 
+            # 判斷 crossing (要用原始frame座標)
+            for idx, line in enumerate(self.lines):
+                if line and line[0] and line[1]:
+                    # canvas->原始座標
+                    lx1, ly1 = int(line[0][0]*self.x_scale), int(line[0][1]*self.y_scale)
+                    lx2, ly2 = int(line[1][0]*self.x_scale), int(line[1][1]*self.y_scale)
+                    self._check_cross(track_id, (center_x, center_y), idx, lx1, ly1, lx2, ly2, label_name)
+                    
             color = self.label_colors.get(label_name, (255, 255, 255))
 
             # 信心分數顯示小數兩位
@@ -331,15 +338,17 @@ class TrafficDetectionGUI:
         if self.detection_running:
             self.root.after(1, self.update_detection)
 
-    def _check_cross(self, track_id, center, line_idx, x1, y1, x2, y2):
+    def _check_cross(self, track_id, center, line_idx, x1, y1, x2, y2, car_type=None):
         if track_id == -1:
             return False
         key = (int(track_id), line_idx)
         px, py = center
         dist = self._point_to_line_dist(px, py, x1, y1, x2, y2)
         if dist < 10 and key not in self.track_dict:
-            self.counts[line_idx] += 1
+            if car_type is not None and car_type in self.counts[line_idx]:
+                self.counts[line_idx][car_type] += 1
             self.track_dict[key] = True
+            self.crossed_track_label[key] = car_type
             return True
         return False
 
@@ -360,7 +369,11 @@ class TrafficDetectionGUI:
     def update_table(self):
         self.text_table.delete(1.0, tk.END)
         for idx in range(self.max_lines):
-            self.text_table.insert(tk.END, f"線{idx+1} 車流量：{self.counts[idx]}\n")
+            total = sum(self.counts[idx][car_type] for car_type in self.car_types)
+            line_info = f"線{idx+1} 總量:{total} "
+            for car_type in self.car_types:
+                line_info += f"{car_type}:{self.counts[idx][car_type]} "
+            self.text_table.insert(tk.END, line_info + "\n")
 
     def pause_detection(self):
         self.detection_running = False
