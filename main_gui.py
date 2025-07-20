@@ -6,6 +6,7 @@ import numpy as np                             # numpy，主要用於陣列數�
 from old_version.selenium_capture import SeleniumCapture   # 匯入自訂的 SeleniumCapture 類別，提供網頁畫面截取（仿 cv2.VideoCapture 介面）
 from ultralytics import YOLO                   # Ultralytics YOLOv8，先進的目標偵測/追蹤模型
 import csv                                     # Python 標準 csv 檔案處理（流量資料匯出用）
+import requests                                 # 用於 HTTP 請求（例如抓取網頁內容）
 
 class TrafficDetectionGUI:
     def __init__(self, root):                                 # 建構子，root 是 Tkinter 主視窗
@@ -127,11 +128,16 @@ class TrafficDetectionGUI:
             return
         self.release_cap()
         try:
-            self.cap = SeleniumCapture(url)    # 用 SeleniumCapture 以 headless Chrome 取得即時畫面
-            self.cap_type = "selenium"
-            self.after_choose_source("爬蟲畫面")
+            # 通知 server.py 切換網址
+            resp = requests.get(f"http://127.0.0.1:5000/set_url?target={url}")
+            if resp.text.strip() != "ok":
+                raise Exception(resp.text)
+            # 用 OpenCV 連 MJPEG 串流
+            self.cap = cv2.VideoCapture("http://127.0.0.1:5000/video")
+            self.cap_type = "mjpeg"
+            self.after_choose_source("MJPEG 串流")
         except Exception as e:
-            messagebox.showerror("錯誤", f"Selenium 初始化失敗：{e}")
+            messagebox.showerror("錯誤", f"來源初始化失敗：{e}")
     
     def after_choose_source(self, src_name):
         # 切換來源之後，先顯示第一幀
@@ -386,11 +392,20 @@ class TrafficDetectionGUI:
         file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV 檔案", "*.csv")])
         if not file_path:
             return
+        
+        labels = ["bus", "car", "motor", "truck"]
         with open(file_path, "w", newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            writer.writerow(["線編號", "車流量"])
+
+            # 表頭：線編號 + 每個車種
+            writer.writerow(["線編號", *labels])
+
+            # 每條線各寫一列
             for idx in range(self.max_lines):
-                writer.writerow([idx+1, self.counts[idx]])
+                row = [idx + 1]                              # 線編號
+                row.extend(self.counts[idx][lb] for lb in labels)  # 依序加入 bus/car/motor/truck 的數量
+                writer.writerow(row)
+
         messagebox.showinfo("匯出完成", "已儲存流量報表！")
 
 if __name__ == "__main__":
