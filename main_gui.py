@@ -275,14 +275,14 @@ class TrafficDetectionGUI:
                 track_id = -1
             else:
                 continue
-            center_x = int((x1 + x2) / 2)
-            center_y = int((y1 + y2) / 2)
 
             # 取得 label 文字
             if hasattr(self.model, "names"):
                 label_name = self.model.names[int(class_id)] if int(class_id) < len(self.model.names) else str(int(class_id))
             else:
                 label_name = str(int(class_id))
+            
+            bottom_x, bottom_y = int((x1 + x2) / 2), int(y2)  # 框底邊中點
 
             # 判斷 crossing (要用原始frame座標)
             for idx, line in enumerate(self.lines):
@@ -290,7 +290,7 @@ class TrafficDetectionGUI:
                     # canvas->原始座標
                     lx1, ly1 = int(line[0][0]*self.x_scale), int(line[0][1]*self.y_scale)
                     lx2, ly2 = int(line[1][0]*self.x_scale), int(line[1][1]*self.y_scale)
-                    self._check_cross(track_id, (center_x, center_y), idx, lx1, ly1, lx2, ly2, label_name)
+                    self._check_cross(track_id, (bottom_x, bottom_y), idx, lx1, ly1, lx2, ly2, label_name)
                     
             color = self.label_colors.get(label_name, (255, 255, 255))
 
@@ -299,7 +299,7 @@ class TrafficDetectionGUI:
 
             # 畫框線（車種分色）
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            cv2.circle(frame, (center_x, center_y), 4, color, -1)
+            cv2.circle(frame, (bottom_x, bottom_y), 4, color, -1)
 
             # ===== 畫 label 底色塊 =====
             (tw, th), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
