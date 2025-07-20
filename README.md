@@ -13,6 +13,6 @@ pip install -r requirements.txt
 ## 執行
 影片開始前選擇輸入源(影片檔, 攝影機, 線上監視器網址)
 ```bash
-python main.py
+python main_gui.py
 ```
 
