@@ -42,9 +42,9 @@ class SeleniumCapture:
             frame = np.array(image)
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             # 這邊可以視需要裁切
-            # h, w = frame.shape[:2]
-            # cx, cy = w // 2, h // 2
-            # frame = frame[cy-170:cy+250, cx-350:cx+350]
+            h, w = frame.shape[:2]
+            cx, cy = w // 2, h // 2
+            frame = frame[cy-170:cy+250, cx-350:cx+350]
             return True, frame
         except Exception as e:
             print("[selenium read error]", e)
