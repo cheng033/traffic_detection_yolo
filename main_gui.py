@@ -89,7 +89,14 @@ class TrafficDetectionGUI:
         self.origin_h = None                     # 原始影像高度
         self.x_scale = 1                         # 原始寬度/顯示寬度（canvas→原圖轉換倍率）
         self.y_scale = 1                         # 原始高度/顯示高度
-
+        self.label_colors = {
+            "car": (0, 255, 0),       # 綠色
+            "bus": (255, 0, 0),       # 藍色
+            "motor": (0, 255, 255),   # 黃色
+            "truck": (255, 128, 0),   # 橘色
+            }
+        
+        
 
     # === 來源選擇 ===
     def choose_video(self):
@@ -271,9 +278,40 @@ class TrafficDetectionGUI:
                     lx1, ly1 = int(line[0][0]*self.x_scale), int(line[0][1]*self.y_scale)
                     lx2, ly2 = int(line[1][0]*self.x_scale), int(line[1][1]*self.y_scale)
                     self._check_cross(track_id, (center_x, center_y), idx, lx1, ly1, lx2, ly2)
-            # 畫框與中心點
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0,255,0), 2)
-            cv2.circle(frame, (center_x, center_y), 4, (0,0,255), -1)
+                    
+            # 取得 label 文字
+            if hasattr(self.model, "names"):
+                label_name = self.model.names[int(class_id)] if int(class_id) < len(self.model.names) else str(int(class_id))
+            else:
+                label_name = str(int(class_id))
+
+            color = self.label_colors.get(label_name, (255, 255, 255))
+
+            # 信心分數顯示小數兩位
+            label_text = f"{label_name} {conf:.2f}"
+
+            # 畫框線（車種分色）
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            cv2.circle(frame, (center_x, center_y), 4, color, -1)
+
+            # ===== 畫 label 底色塊 =====
+            (tw, th), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            # 底色矩形（比字高一點），底色可自訂（這裡用車種顏色，透明度 0.7）
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (int(x1), int(y1)-th-baseline-6), (int(x1)+tw+6, int(y1)), color, -1)
+            alpha = 0.7
+            frame = cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0)
+
+            # 畫 label 字
+            cv2.putText(
+                frame,
+                label_text,
+                (int(x1)+3, int(y1)-5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0,0,0), 2, cv2.LINE_AA  # 黑色字，和底色做對比
+            )
+
         # 畫每條線（用原始frame座標畫）
         for idx, line in enumerate(self.lines):
             if line and line[0] and line[1]:
