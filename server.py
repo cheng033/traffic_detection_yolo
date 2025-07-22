@@ -9,7 +9,7 @@ from selenium.webdriver.common.by import By
 # ====== 設定 ======
 TARGET_URL = "https://tw.live/cam/?id=NWT0052"
 WINDOW_SIZE = "1400,900"
-INTERVAL = 0.2  # 每幾秒抓一張圖
+INTERVAL = 0.1  # 每幾秒抓一張圖
 
 # ====== 初始化 Selenium ======
 chrome_options = Options()
