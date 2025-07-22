@@ -1,0 +1,536 @@
+import tkinter as tk                           # 導入 tkinter，Python 標準 GUI 工具包，tk 是常見別名
+from tkinter import filedialog, messagebox, ttk     # 導入檔案對話框、訊息視窗（例如開啟檔案、彈出警告用）
+from PIL import Image, ImageTk                 # 導入 PIL 圖像處理（Image：開啟/處理圖片；ImageTk：Tkinter 顯示圖片轉換）
+import cv2                                     # OpenCV，主流影像處理與即時攝影機/影片讀取、處理套件
+import numpy as np                             # numpy，主要用於陣列數值運算（OpenCV 與 YOLO 輸出多為 numpy array）
+from old_version.selenium_capture import SeleniumCapture   # 匯入自訂的 SeleniumCapture 類別，提供網頁畫面截取（仿 cv2.VideoCapture 介面）
+from ultralytics import YOLO                   # Ultralytics YOLOv8，先進的目標偵測/追蹤模型
+import csv                                     # Python 標準 csv 檔案處理（流量資料匯出用）
+import requests                                 # 用於 HTTP 請求（例如抓取網頁內容）
+import datetime
+import subprocess
+import sys
+import os
+import time
+
+    
+
+class TrafficDetectionGUI:
+    def __init__(self, root):                                 # 建構子，root 是 Tkinter 主視窗
+        self.root = root
+        self.root.title("車流量辨識系統")                     # 設定視窗標題
+        self.server_proc = None
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+
+        # === 主畫面結構 ===
+        self.frame_top = tk.Frame(root)                        # 主上層 Frame，左右分區用
+        self.frame_top.pack(side=tk.TOP)
+
+        # 影像顯示區（左邊）
+        self.frame_video = tk.Frame(self.frame_top)            # 左側 Frame，放影像
+        self.frame_video.pack(side=tk.LEFT, padx=10, pady=10)
+        self.display_w = 800                                   # 顯示區寬度（canvas用，與所有座標相關）
+        self.display_h = 450                                   # 顯示區高度
+        self.canvas = tk.Canvas(self.frame_video, width=self.display_w, height=self.display_h, bg="#eee")
+        self.canvas.pack()                                     # Canvas：影像＋畫線區
+
+        # 控制/操作區（右邊）
+        self.frame_controls = tk.Frame(self.frame_top)         # 右側 Frame，放所有控制按鈕/欄位
+        self.frame_controls.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.Y)
+
+        # 來源選擇（本地影片、攝影機）
+        self.btn_choose_video = tk.Button(self.frame_controls, text="選擇影片", width=18, command=self.choose_video)
+        self.btn_choose_video.pack(pady=6)
+        self.btn_camera = tk.Button(self.frame_controls, text="攝影機模式", width=18, command=self.choose_camera)
+        self.btn_camera.pack(pady=6)
+
+        # URL爬蟲區（在攝影機按鈕下方）
+        self.url_var = tk.StringVar()                          # 用於儲存輸入框內容
+        self.entry_url = tk.Entry(self.frame_controls, textvariable=self.url_var, width=20)
+        self.entry_url.pack(pady=(6,2))
+        self.btn_crawl = tk.Button(self.frame_controls, text="啟動爬蟲", width=18, command=self.choose_url)
+        self.btn_crawl.pack(pady=6)
+
+        # 線段設定（設定1~4條線）
+        self.min_lines = 2                                    # 最少畫幾條線
+        self.max_lines = 4                                    # 最多幾條線（可調整）
+        default_names = [f"線{num+1}" for num in range(self.max_lines)]
+        self.road_names = [tk.StringVar(value=default_names[i]) for i in range(self.max_lines)]
+
+        self.road_name_entries = []   # 存每條 entry（如要取值可直接用 self.road_names）
+
+        self.line_set_buttons = []
+        self.road_name_entries = []
+        
+        for i in range(self.max_lines):
+            line_frame = tk.Frame(self.frame_controls)
+            line_frame.pack(pady=4, fill=tk.X)
+        
+            lbl = tk.Label(line_frame, text=f"道路名稱", font=("Arial", 11))
+            lbl.pack(side=tk.TOP, anchor="w", pady=(0,2))
+        
+            entry = tk.Entry(line_frame, textvariable=self.road_names[i], width=16, font=("Arial", 12), bd=2, relief="solid")
+            entry.pack(side=tk.LEFT, padx=(0, 8), ipady=2, expand=True, fill=tk.X)
+            self.road_name_entries.append(entry)
+        
+            btn = tk.Button(line_frame, text="畫線", width=7, command=lambda idx=i: self.edit_line(idx), state=tk.DISABLED)
+            btn.pack(side=tk.LEFT, padx=4)
+            self.line_set_buttons.append(btn)
+
+
+        # 其餘主控按鈕（全部清除、開始辨識、暫停、匯出、退出）
+        self.btn_redraw = tk.Button(self.frame_controls, text="全部清除", width=18, command=self.clear_all_lines, state=tk.DISABLED)
+        self.btn_redraw.pack(pady=6)
+        self.btn_start = tk.Button(
+            self.frame_controls,
+            text="開始辨識",
+            width=18,
+            state=tk.DISABLED,
+            command=self.start_detection,
+            bg="#4CAF50",             # 綠色背景
+            fg="#ffffff",             # 白色字
+            activebackground="#388E3C",  # 按下時深綠色
+            activeforeground="#ffffff"
+        )
+        self.btn_start.pack(pady=6)
+
+        self.btn_pause = tk.Button(self.frame_controls, text="暫停", width=18, state=tk.DISABLED, command=self.pause_detection, 
+                                   bg="#D32F2F", # 紅色背景
+                                   fg="#ffffff",  # 白色字
+                                    activebackground="#B71C1C",  # 按下時深紅色
+                                    activeforeground="#ffffff")
+        self.btn_pause.pack(pady=6)
+        # ---- 在這裡加「天氣」Combobox ----
+        self.lbl_weather = tk.Label(self.frame_controls, text="天氣")
+        self.lbl_weather.pack(pady=(15, 0))
+        self.weather_var = tk.StringVar()
+        self.weather_combobox = ttk.Combobox(
+            self.frame_controls,
+            textvariable=self.weather_var,
+            values=["晴", "陰", "雨", "多雲", "雷陣雨", "霧", "其他"],
+            state="readonly",
+            width=15
+        )
+        self.weather_combobox.current(0)  # 預設選「晴」
+        self.weather_combobox.pack(pady=6)
+        self.btn_export_csv = tk.Button(self.frame_controls, text="匯出CSV", width=18, state=tk.DISABLED, command=self.export_csv)
+        self.btn_export_csv.pack(pady=6)
+        self.btn_exit = tk.Button(self.frame_controls, text="退出", width=18, command=root.quit)
+        self.btn_exit.pack(pady=6)
+
+        # 新增底部 Frame（影片下方統計表）
+        self.frame_bottom = tk.Frame(root)
+        self.frame_bottom.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(0,10))
+
+        self.lbl_table_title = tk.Label(self.frame_bottom, text="流量統計表", font=("Arial", 16, "bold"))
+        self.lbl_table_title.pack(side=tk.LEFT, padx=(0,10))
+
+        self.text_table = tk.Text(self.frame_bottom, height=4, width=80, font=("Consolas", 16))
+        self.text_table.pack(side=tk.LEFT, padx=4)
+
+        # === 狀態變數初始化 ===
+        self.cap = None                          # 當前來源物件（cv2.VideoCapture 或 SeleniumCapture）
+        self.cap_type = None                     # 來源型別 "video"、"camera"、"selenium"
+        self.video_source = None                 # 檔案路徑或攝影機編號（備查）
+        self.detection_running = False           # 是否正在進行辨識
+        self.lines = [None for _ in range(self.max_lines)]      # 存每條線的座標（Canvas上 x,y）
+        self.line_ids = [None for _ in range(self.max_lines)]   # Canvas 畫線物件id
+        self.label_ids = [None for _ in range(self.max_lines)]  # Canvas 編號文字物件id
+        self.editing_line_idx = None             # 正在設定哪一條線（索引）
+        self.editing_point = 0                   # 目前編輯點數（0=等起點，1=等終點）
+        self.imgtk = None                        # 影像暫存（Tkinter 圖片，防止被GC釋放）
+        self.origin_w = None                     # 原始影像寬度（for座標轉換用）
+        self.origin_h = None                     # 原始影像高度
+        self.x_scale = 1                         # 原始寬度/顯示寬度（canvas→原圖轉換倍率）
+        self.y_scale = 1                         # 原始高度/顯示高度
+        self.label_colors = {
+            "bus": (255, 128, 0),       # 橘色
+            "car": (0, 255, 0),       # 綠色
+            "motor": (0, 255, 255),   # 黃色
+            "truck": (255, 0, 0),   # 藍色
+            }
+        self.car_types = ["bus", "car", "motor", "truck"]  
+        self.counts = [ { t: 0 for t in self.car_types } for _ in range(self.max_lines) ]
+        self.crossed_track_label = {} # 用於記錄已經過線的車輛與其類型（track_id, line_idx）: car_type
+        self.detect_start_time = None   # 記錄開始偵測時間
+        self.detect_end_time = None     # 記錄偵測結束/暫停時間
+
+        
+
+    # === 來源選擇 ===
+    def choose_video(self):
+        self.release_cap()    # 釋放前一個來源（防止同時打開多個 VideoCapture）
+        # 彈出檔案選擇視窗，只允許選擇 mp4/avi 等影片檔
+        path = filedialog.askopenfilename(title="選擇影片檔案", filetypes=[("Video files", "*.mp4;*.avi")])
+        if path:
+            self.cap = cv2.VideoCapture(path)  # 用 OpenCV 打開選中的影片檔
+            self.cap_type = "video"            # 標記來源型態
+            self.after_choose_source("影片")    # 共用的後續 UI/狀態更新
+    
+    def choose_camera(self):
+        self.release_cap()    # 釋放舊來源
+        self.cap = cv2.VideoCapture(0)         # 打開預設攝影機（編號0）
+        self.cap_type = "camera"               # 標記來源型態
+        self.after_choose_source("攝影機")
+    
+    def choose_url(self):
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showerror("錯誤", "請輸入網址！")
+            return
+    
+        # 啟動 server.py（如尚未啟動或已結束）
+        if not hasattr(self, "server_proc") or self.server_proc is None or self.server_proc.poll() is not None:
+            try:
+                self.server_proc = subprocess.Popen(
+                    [sys.executable, os.path.join(os.path.dirname(__file__), "server.py")],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+                )
+                # 【重點】自動檢查 server 是否啟動完成
+                for i in range(20):  # 最多等 10 秒
+                    try:
+                        r = requests.get("http://127.0.0.1:5000/", timeout=1)
+                        if r.status_code in (200, 404):  # 有正常回應就算成功
+                            break
+                    except Exception:
+                        time.sleep(0.5)
+                else:
+                    messagebox.showerror("錯誤", "server.py 啟動超時，請確認 server.py 沒有報錯！")
+                    return
+            except Exception as e:
+                messagebox.showerror("錯誤", f"自動啟動 server.py 失敗: {e}")
+                return
+    
+        self.release_cap()
+        try:
+            # 設定目標網址
+            resp = requests.get(f"http://127.0.0.1:5000/set_url?target={url}")
+            if resp.text.strip() != "ok":
+                raise Exception(resp.text)
+            # 開始抓 MJPEG 串流
+            self.cap = cv2.VideoCapture("http://127.0.0.1:5000/video")
+            self.cap_type = "mjpeg"
+            self.after_choose_source("MJPEG 串流")
+        except Exception as e:
+            messagebox.showerror("錯誤", f"來源初始化失敗：{e}")
+
+
+    
+    def after_choose_source(self, src_name):
+        # 切換來源之後，先顯示第一幀
+        self.show_first_frame()
+        # 開放所有設定線按鈕（可畫線）
+        for btn in self.line_set_buttons:
+            btn.config(state=tk.NORMAL)
+        self.btn_redraw.config(state=tk.NORMAL)         # 全部清除按鈕開啟
+        self.btn_start.config(state=tk.DISABLED)        # 辨識尚未啟動
+        # 彈出提示訊息
+        messagebox.showinfo("請標註線", f"目前來源：{src_name}\n請按右側各條線的「設定」按鈕，依序指定起點與終點（至少2條線）")
+    
+    def release_cap(self):
+        # 釋放/關閉現有來源資源，避免資源占用與多重開啟
+        if self.cap is not None:
+            try:
+                if self.cap_type == "selenium":
+                    self.cap.release()         # SeleniumCapture: 關閉 driver
+                elif self.cap_type in ("video", "camera"):
+                    self.cap.release()         # OpenCV VideoCapture: 釋放資源
+            except Exception:
+                pass
+            self.cap = None
+            self.cap_type = None
+
+    # === 影像顯示與畫線 ===
+    def show_first_frame(self):
+        if self.cap is None:
+            return
+        ret, frame = self.cap.read()
+        if ret and frame is not None:
+            self.origin_w = frame.shape[1]
+            self.origin_h = frame.shape[0]
+            self.x_scale = self.origin_w / self.display_w
+            self.y_scale = self.origin_h / self.display_h
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(cv2.resize(frame_rgb, (self.display_w, self.display_h)))
+            self.imgtk = ImageTk.PhotoImage(img)
+            self.canvas.create_image(0, 0, anchor="nw", image=self.imgtk)
+            self.redraw_all_lines()
+        else:
+            messagebox.showerror("錯誤", "無法讀取影片/攝影機/爬蟲來源")
+
+    def edit_line(self, idx):
+        self.editing_line_idx = idx
+        self.editing_point = 0
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.config(cursor="crosshair")
+        roadname = self.road_names[idx].get() or f"線{idx+1}"
+        messagebox.showinfo("設定線", f"請標註【{roadname}】的起點、終點")
+
+
+    def on_canvas_click(self, event):
+        idx = self.editing_line_idx
+        if idx is None:
+            return
+        if self.editing_point == 0:
+            self.lines[idx] = [(event.x, event.y), None]
+            self.editing_point = 1
+        elif self.editing_point == 1:
+            if self.lines[idx] is None:
+                return
+            self.lines[idx][1] = (event.x, event.y)
+            self.redraw_line(idx)
+            self.editing_line_idx = None
+            self.editing_point = 0
+            self.canvas.unbind("<Button-1>")
+            self.canvas.config(cursor="")
+            # 判斷已完成線數
+            line_count = sum(1 for l in self.lines if l is not None and l[0] and l[1])
+            if line_count >= self.min_lines:
+                self.btn_start.config(state=tk.NORMAL)
+            else:
+                self.btn_start.config(state=tk.DISABLED)
+
+    def redraw_line(self, idx):
+        if self.line_ids[idx]:
+            self.canvas.delete(self.line_ids[idx])
+            self.line_ids[idx] = None
+        if self.label_ids[idx]:
+            self.canvas.delete(self.label_ids[idx])
+            self.label_ids[idx] = None
+        data = self.lines[idx]
+        if data is None or data[0] is None or data[1] is None:
+            return
+        x1, y1 = data[0]
+        x2, y2 = data[1]
+        line_id = self.canvas.create_line(x1, y1, x2, y2, fill="red", width=3)
+        mid_x = int((x1 + x2) / 2)
+        mid_y = int((y1 + y2) / 2)
+        label_id = self.canvas.create_text(mid_x, mid_y, text=str(idx+1), fill="white", font=("Arial", 14, "bold"))
+        self.line_ids[idx] = line_id
+        self.label_ids[idx] = label_id
+
+    def redraw_all_lines(self):
+        for idx in range(self.max_lines):
+            self.redraw_line(idx)
+
+    def clear_all_lines(self):
+        for i in range(self.max_lines):
+            if self.line_ids[i]:
+                self.canvas.delete(self.line_ids[i])
+                self.line_ids[i] = None
+            if self.label_ids[i]:
+                self.canvas.delete(self.label_ids[i])
+                self.label_ids[i] = None
+            self.lines[i] = None
+        self.btn_start.config(state=tk.DISABLED)
+        
+
+    # === YOLO辨識 & 計數 ===
+    def start_detection(self):
+        if hasattr(self, 'detection_running') and self.detection_running:
+            return
+        self.model = YOLO('modelv14.pt')
+        self.detection_running = True
+        self.detect_start_time = datetime.datetime.now()   # 記錄開始辨識時間
+        self.detect_end_time = None                        # 清空結束時間（避免續用舊資料）
+        self.counts = [ { t: 0 for t in self.car_types } for _ in range(self.max_lines) ]
+        self.track_dict = {}
+        self.btn_pause.config(state=tk.NORMAL)
+        self.btn_start.config(state=tk.DISABLED)
+        self.btn_export_csv.config(state=tk.DISABLED)
+        self.text_table.delete(1.0, tk.END)
+        self.update_detection()
+
+    def update_detection(self):
+        if not self.detection_running or self.cap is None:
+            return
+        ret, frame = self.cap.read()
+        if not ret or frame is None:
+            self.detection_running = False
+            self.btn_pause.config(state=tk.DISABLED)
+            self.btn_export_csv.config(state=tk.NORMAL)
+            messagebox.showinfo("完成", "影片/來源已結束，辨識停止！")
+            return
+
+        # YOLOv8追蹤辨識
+        results = self.model.track(frame, persist=True, verbose=False, conf=0.3)[0]
+        boxes = np.array(results.boxes.data.tolist(), dtype="float")
+        for box in boxes:
+            if len(box) >= 7:
+                x1, y1, x2, y2, track_id, conf, class_id = box[:7]
+            elif len(box) == 6:
+                x1, y1, x2, y2, conf, class_id = box
+                track_id = -1
+            else:
+                continue
+
+            # 取得 label 文字
+            if hasattr(self.model, "names"):
+                label_name = self.model.names[int(class_id)] if int(class_id) < len(self.model.names) else str(int(class_id))
+            else:
+                label_name = str(int(class_id))
+            
+            bottom_x, bottom_y = int((x1 + x2) / 2), int(y2)  # 框底邊中點
+
+            # 判斷 crossing (要用原始frame座標)
+            for idx, line in enumerate(self.lines):
+                if line and line[0] and line[1]:
+                    # canvas->原始座標
+                    lx1, ly1 = int(line[0][0]*self.x_scale), int(line[0][1]*self.y_scale)
+                    lx2, ly2 = int(line[1][0]*self.x_scale), int(line[1][1]*self.y_scale)
+                    self._check_cross(track_id, (bottom_x, bottom_y), idx, lx1, ly1, lx2, ly2, label_name)
+                    
+            color = self.label_colors.get(label_name, (255, 255, 255))
+
+            # 信心分數顯示小數兩位
+            label_text = f"{label_name} {conf:.2f}"
+
+            # 畫框線（車種分色）
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            cv2.circle(frame, (bottom_x, bottom_y), 4, color, -1)
+
+            # ===== 畫 label 底色塊 =====
+            (tw, th), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            # 底色矩形（比字高一點），底色可自訂（這裡用車種顏色，透明度 0.7）
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (int(x1), int(y1)-th-baseline-6), (int(x1)+tw+6, int(y1)), color, -1)
+            alpha = 0.7
+            frame = cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0)
+
+            # 畫 label 字
+            cv2.putText(
+                frame,
+                label_text,
+                (int(x1)+3, int(y1)-5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0,0,0), 2, cv2.LINE_AA  # 黑色字，和底色做對比
+            )
+
+        # 畫每條線（用原始frame座標畫）
+        for idx, line in enumerate(self.lines):
+            if line and line[0] and line[1]:
+                lx1, ly1 = int(line[0][0]*self.x_scale), int(line[0][1]*self.y_scale)
+                lx2, ly2 = int(line[1][0]*self.x_scale), int(line[1][1]*self.y_scale)
+                cv2.line(frame, (lx1,ly1), (lx2,ly2), (0,0,255), 3)
+                mx = int((lx1 + lx2) / 2)
+                my = int((ly1 + ly2) / 2)
+                cv2.putText(frame, str(idx+1), (mx-10, my-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+        # 更新Tkinter影像（縮回顯示尺寸）
+        show_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        show_img = cv2.resize(show_img, (self.display_w, self.display_h))
+        imgtk = ImageTk.PhotoImage(Image.fromarray(show_img))
+        self.canvas.imgtk = imgtk
+        self.canvas.create_image(0,0,anchor="nw", image=imgtk)
+        self.update_table()
+        if self.detection_running:
+            self.root.after(1, self.update_detection)
+
+    def _check_cross(self, track_id, center, line_idx, x1, y1, x2, y2, car_type=None):
+        if track_id == -1:
+            return False
+        key = (int(track_id), line_idx)
+        px, py = center
+        dist = self._point_to_line_dist(px, py, x1, y1, x2, y2)
+        if dist < 10 and key not in self.track_dict:
+            if car_type is not None and car_type in self.counts[line_idx]:
+                self.counts[line_idx][car_type] += 1
+            self.track_dict[key] = True
+            self.crossed_track_label[key] = car_type
+            return True
+        return False
+
+    def _point_to_line_dist(self, px, py, x1, y1, x2, y2):
+        a = np.array([px, py])
+        b = np.array([x1, y1])
+        c = np.array([x2, y2])
+        ba = a - b
+        bc = c - b
+        if np.dot(ba, bc) < 0:
+            return np.linalg.norm(ba)
+        ca = a - c
+        cb = b - c
+        if np.dot(ca, cb) < 0:
+            return np.linalg.norm(ca)
+        return np.abs(np.cross(bc, ba)) / np.linalg.norm(bc)
+
+    def update_table(self):
+        self.text_table.delete(1.0, tk.END)
+        for idx in range(self.max_lines):
+            # 取當前路名，若空白就用預設名
+            roadname = self.road_names[idx].get() or f"線{idx+1}"
+            total = sum(self.counts[idx][car_type] for car_type in self.car_types)
+            line_info = f"{roadname} 總量:{total} "
+            for car_type in self.car_types:
+                line_info += f"{car_type}:{self.counts[idx][car_type]} "
+            self.text_table.insert(tk.END, line_info + "\n")
+
+
+    def pause_detection(self):
+        self.detection_running = False
+        self.btn_start.config(state=tk.NORMAL)
+        self.btn_pause.config(state=tk.DISABLED)
+        self.btn_export_csv.config(state=tk.NORMAL)
+        self.detect_end_time = datetime.datetime.now()   # 記錄偵測結束時間
+        messagebox.showinfo("暫停", "辨識已暫停，可繼續或匯出報表")
+
+
+    def export_csv(self):
+    
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV 檔案", "*.csv")])
+        if not file_path:
+            return
+    
+        # 開始、結束時間（若還沒暫停就取當下）
+        start = self.detect_start_time or datetime.datetime.now()
+        end = self.detect_end_time or datetime.datetime.now()
+    
+        date_str = start.strftime('%Y/%m/%d')
+        time_range_str = f"{start.strftime('%H:%M:%S')} ~ {end.strftime('%H:%M:%S')}"
+    
+        weather = self.weather_var.get()
+            
+        labels = ["汽車", "機車", "卡車", "公車"]
+    
+        with open(file_path, "w", newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            # 第一行標題
+            writer.writerow(["", "日期", "時間", *labels, "天氣"])
+            # 各線數據
+            for idx in range(self.max_lines):
+                roadname = self.road_names[idx].get() or f"線{idx+1}"
+                row = [
+                    roadname,
+                    date_str,
+                    time_range_str,
+                    self.counts[idx]["car"],
+                    self.counts[idx]["motor"],
+                    self.counts[idx]["truck"],
+                    self.counts[idx]["bus"],
+                    weather
+                ]
+
+                writer.writerow(row)
+        messagebox.showinfo("匯出完成", "已儲存流量報表！")
+        
+  #----關閉server-----      
+    def on_closing(self):
+        # 結束時關閉 server.py
+        try:
+            if hasattr(self, "server_proc") and self.server_proc is not None:
+                if self.server_proc.poll() is None:    # 進程還在，才要終止
+                    self.server_proc.terminate()
+                    self.server_proc.wait(timeout=3)   # 最多等3秒
+        except Exception as e:
+            print("關閉 server.py 發生例外:", e)
+        self.root.destroy()
+
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = TrafficDetectionGUI(root)
+    root.mainloop()
